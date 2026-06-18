@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const apiRoutes = require('./routes/apiRoutes');
+const { initDB } = require('./config/db'); // Import inicjalizacji bazy
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,6 +21,12 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
-app.listen(PORT, () => {
-    console.log(`Serwer GPS Tracker działa na http://localhost:${PORT}`);
-});
+initDB()
+    .then(() => {
+        app.listen(PORT, () => {
+            console.log(`Serwer GPS Tracker działa na http://localhost:${PORT}`);
+        });
+    })
+    .catch((err) => {
+        console.error('Krytyczny błąd inicjalizacji bazy danych:', err);
+    });
