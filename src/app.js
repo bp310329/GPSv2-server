@@ -4,7 +4,7 @@ const apiRoutes = require('./routes/apiRoutes');
 const { initDB } = require('./config/db'); // Import inicjalizacji bazy
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 21491;
 
 // Middleware do automatycznego parsowania JSON w żądaniach
 app.use(express.json());

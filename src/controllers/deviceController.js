@@ -16,24 +16,51 @@ exports.getHistory = async (req, res) => {
 };
 
 exports.receiveTelemetry = async (req, res) => {
-    const { deviceId, lat, lng } = req.body;
+    if (!req.body) {
+        return res.status(400).json({ success: false, error: 'Brak danych telemetrycznych.' });
+    }
 
-    if (!deviceId || !lat || !lng) {
-        return res.status(400).json({ success: false, error: 'Niekompletne dane telemetryczne.' });
+    const items = Array.isArray(req.body) ? req.body : [req.body];
+
+    if (items.length === 0) {
+        return res.status(400).json({ success: false, error: 'Przesłana paczka danych jest pusta.' });
+    }
+
+    for (const item of items) {
+        if (!item || !item.device_id || item.lat === undefined || item.lon === undefined) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Niekompletne dane telemetryczne w jednym lub wielu wpisach.' 
+            });
+        }
     }
 
     try {
         const db = getDB();
-        const currentTimestamp = new Date().toISOString(); // Generowanie ISO timestamp w Node.js
 
-        // Wstawienie danych pozycji do tabeli gps_data
-        await db.run(
-            "INSERT INTO gps_data (device_id, timestamp, latitude, longitude) VALUES (?, ?, ?, ?)",
-            [deviceId, currentTimestamp, lat, lng]
-        );
+        const placeholders = items.map(() => "(?, ?, ?, ?)" ).join(", ");
+        const sql = `INSERT INTO gps_data (device_id, timestamp, latitude, longitude) VALUES ${placeholders}`;
 
-        console.log(`[SQLITE] Zapisano pozycję trackera ${deviceId}: [${lat}, ${lng}]`);
-        return res.status(200).json({ success: true, message: 'Pozycja GPS zapisana w bazie danych.' });
+        const params = [];
+        for (const item of items) {
+            const finalTimestamp = item.timestamp || new Date().toISOString();
+            params.push(item.device_id, finalTimestamp, item.lat, item.lon);
+        }
+
+        await db.run(sql, params);
+        
+        if (items.length === 1) {
+            console.log(`[SQLITE] Zapisano pozycję trackera ${items[0].device_id}: [${items[0].lat}, ${items[0].lon}]`);
+        } else {
+            console.log(`[SQLITE] Zapisano pomyślnie ${items.length} pozycji do bazy danych.`);
+        }
+        
+        return res.status(200).json({ 
+            success: true, 
+            message: items.length === 1 
+                ? 'Pozycja GPS zapisana w bazie danych.' 
+                : `Zapisano batch zawierający ${items.length} pozycji GPS.` 
+        });
 
     } catch (error) {
         console.error('Błąd zapisu telemetrii do SQLite:', error);
@@ -41,12 +68,10 @@ exports.receiveTelemetry = async (req, res) => {
     }
 };
 
-// NOWOŚĆ: Czyszczenie całej tabeli gps_data w SQLite
 exports.clearHistory = async (req, res) => {
     try {
         const db = getDB();
         
-        // Wykonanie polecenia SQL usuwającego wszystkie wiersze z tabeli
         await db.run("DELETE FROM gps_data");
         
         console.log('[SQLITE] Cała historia pozycji GPS została trwale usunięta.');

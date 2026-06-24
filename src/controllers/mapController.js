@@ -1,4 +1,5 @@
 // src/controllers/mapController.js
+const { json } = require('express');
 const { getDB } = require('../config/db');
 
 // Domyślny tryb serwera: 'history' (przeglądanie) lub 'planning' (planowanie trasy)
@@ -58,25 +59,35 @@ exports.saveWaypoints = async (req, res) => {
 exports.getPendingWaypoints = async (req, res) => {
     try {
         const db = getDB();
-        
-        // Pobieramy punkty oznaczone jako oczekujące ('pending')
-        // Używamy aliasu 'as lat/lng' aby zachować format JSON oczekiwany przez frontend/urządzenie
-        const rows = await db.all("SELECT latitude as lat, longitude as lng FROM waypoints WHERE status = 'pending'");
+        const BATCH_LIMIT = 5;
 
-        res.status(200).json({
-            success: true,
-            points: rows
-        });
+        // 1. Pobieramy max 5 punktów 'pending'
+        const rows = await db.all(
+            "SELECT id, latitude as lat, longitude as lng FROM waypoints WHERE status = 'pending' LIMIT ?", 
+            [BATCH_LIMIT]
+        );
 
-        // Opcjonalnie: po pobraniu punktów przez urządzenie oznaczamy je jako wysłane, 
-        // dzięki czemu przy kolejnym odpytaniu urządzenie nie dostanie duplikatu trasy.
+        // 2. NAJPIERW aktualizujemy bazę danych i czekamy na zakończenie zapisu (await)
         if (rows.length > 0) {
-            await db.run("UPDATE waypoints SET status = 'sent' WHERE status = 'pending'");
-            console.log(`[SQLITE] Punkty trasy zostały przekazane urządzeniu i oznaczone jako wysłane.`);
+            const ids = rows.map(r => r.id);
+            const placeholders = ids.map(() => "?").join(", ");
+            
+            await db.run(`UPDATE waypoints SET status = 'sent' WHERE id IN (${placeholders})`, ids);
+            console.log(`[SQLITE] Zablokowano i oznaczono paczkę ${rows.length} punktów jako wysłane.`);
         }
+
+        const pointsToSend = rows.map(r => ({ lat: r.lat, lng: r.lng }));
+
+        // 3. DOPIERO TERAZ, gdy baza jest bezpieczna, wysyłamy odpowiedź do ESP32
+        return res.status(200).json({
+            success: true,
+            points: pointsToSend
+        });
 
     } catch (error) {
         console.error('Błąd odczytu z SQLite:', error);
-        res.status(500).json({ success: false, error: 'Błąd bazy danych.' });
+        if (!res.headersSent) {
+            return res.status(500).json({ success: false, error: 'Błąd bazy danych.' });
+        }
     }
 };
